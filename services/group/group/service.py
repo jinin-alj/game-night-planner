@@ -1,8 +1,7 @@
 import sqlite3
 from datetime import date
 
-from group import repository
-from group import library_client
+from group import library_client, repository
 
 NEVER_PLAYED_RATING = 10
 UNRATED_RATING = 5
