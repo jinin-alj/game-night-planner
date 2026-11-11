@@ -1,7 +1,9 @@
 from flask import Flask, jsonify
+
 import config
 from group import repository as group_repository
 from group.routes import group_blueprint
+
 
 def create_app() -> Flask:
     """build the Flask app and register its routes and error handlers"""

@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+
 import config
 from library import repository as library_repository
 from library.routes import library_blueprint
