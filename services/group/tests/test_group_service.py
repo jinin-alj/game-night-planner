@@ -2,14 +2,18 @@ import sqlite3
 
 import pytest
 
-from group import repository, service
-from library import repository as library_repository
+from group import library_client, repository, service
+
+# im using a fake library so that i can test the group service without relying on the real library
+fake_library_games = []
 
 
 def add_library_game(title: str, min_players: int, max_players: int, playtime_minutes: int) -> int:
-    """put a game straight into the library and return its id"""
-    return library_repository.add_game(
+    """add a game to the pretend library and return its id, the way the real library numbers new games"""
+    game_id = len(fake_library_games) + 1
+    fake_library_games.append(
         {
+            "id": game_id,
             "title": title,
             "owner": "Jinin",
             "min_players": min_players,
@@ -17,14 +21,37 @@ def add_library_game(title: str, min_players: int, max_players: int, playtime_mi
             "playtime_minutes": playtime_minutes,
         }
     )
+    return game_id
+
+
+def fake_find_games_that_fit(players: int, minutes: int) -> list[dict]:
+    """return the pretend library's games that fit, using the same rules as the real library's SQL query"""
+    fitting_games = []
+    for game in fake_library_games:
+        enough_seats = game["min_players"] <= players and game["max_players"] >= players
+        short_enough = game["playtime_minutes"] <= minutes
+        if enough_seats and short_enough:
+            fitting_games.append(game)
+    return fitting_games
+
+
+def fake_get_game_title(game_id: int) -> str | None:
+    """return a pretend game's title, or None for an unknown id, just like the real library client"""
+    for game in fake_library_games:
+        if game["id"] == game_id:
+            return game["title"]
+    return None
 
 
 @pytest.fixture(autouse=True)
 def empty_database(tmp_path, monkeypatch):
-    """give every test its own empty database with both domains' tables"""
+    """give every test its own empty group database and an empty pretend library"""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    library_repository.create_tables()
     repository.create_tables()
+
+    fake_library_games.clear()
+    monkeypatch.setattr(library_client, "find_games_that_fit", fake_find_games_that_fit)
+    monkeypatch.setattr(library_client, "get_game_title", fake_get_game_title)
 
 
 # rating rules
@@ -298,7 +325,6 @@ def test_build_night_plan_puts_the_highest_scoring_games_first():
     pandemic_id = add_library_game("Pandemic", 2, 4, 45)
     add_library_game("Wingspan", 1, 5, 70)
 
-    # azul was played last week and loved, pandemic was played last week and disliked
     last_week = service.create_night("2026-10-05", 120, [sara["id"], omar["id"]], [])
     service.log_play(last_week["id"], azul_id)
     service.log_play(last_week["id"], pandemic_id)
@@ -309,7 +335,6 @@ def test_build_night_plan_puts_the_highest_scoring_games_first():
     tonight = service.create_night("2026-10-12", 120, [sara["id"], omar["id"]], [])
     plan = service.build_night_plan(tonight["id"])
 
-    # wingspan was never played: 10 + 5, azul: 8 + 1, pandemic: (2 + 5) / 2 + 1
     planned_titles = []
     for game in plan["games"]:
         planned_titles.append(game["title"])
@@ -350,7 +375,6 @@ def test_rating_reminders_list_games_a_member_played_but_never_rated():
 
     reminders = service.rating_reminders()
 
-    # omar already rated it and lina was not there, so only sara is reminded
     assert reminders == [
         {"member_id": sara["id"], "member_name": "Sara", "game_id": azul_id, "title": "Azul"}
     ]
