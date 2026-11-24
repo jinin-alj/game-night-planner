@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # main is covered by the deploy workflow, which runs this file first, so CI never runs twice on the same commit
+    branches-ignore: [main]
   pull_request:
   workflow_call:
 

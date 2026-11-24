@@ -1,0 +1,87 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+# only one deploy at a time, so two runs can never start migrations against the same database together
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  ci:
+    # the same lint, tests, coverage gate and image builds as every push, which also publish the images from main
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    # deploy only a commit whose CI passed
+    needs: ci
+    runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      LIBRARY_APP: ${{ vars.PREFIX }}-library
+      GROUP_APP: ${{ vars.PREFIX }}-group
+      SQL_HOST: ${{ vars.PREFIX }}-sql.database.windows.net
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      # signs in as the managed identity through OpenID Connect, so no Azure password exists anywhere
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Find the addresses of both services
+        run: |
+          LIBRARY_HOST=$(az containerapp show --name "$LIBRARY_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          GROUP_HOST=$(az containerapp show --name "$GROUP_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          echo "LIBRARY_URL=https://$LIBRARY_HOST" >> "$GITHUB_ENV"
+          echo "GROUP_URL=https://$GROUP_HOST" >> "$GITHUB_ENV"
+
+      - name: Deploy library
+        run: |
+          az containerapp secret set --name "$LIBRARY_APP" --resource-group "$RESOURCE_GROUP" \
+            --secrets "database-url=mssql://library_user:${{ secrets.LIBRARY_DB_PASSWORD }}@${SQL_HOST}:1433/${{ vars.PREFIX }}-library-db"
+          az containerapp update --name "$LIBRARY_APP" --resource-group "$RESOURCE_GROUP" \
+            --image "ghcr.io/${OWNER}/game-night-library:${GITHUB_SHA}" \
+            --set-env-vars "DATABASE_URL=secretref:database-url" "CORS_ORIGIN=${{ vars.UI_ORIGIN }}" "APP_VERSION=${GITHUB_SHA}"
+
+      - name: Deploy group
+        run: |
+          az containerapp secret set --name "$GROUP_APP" --resource-group "$RESOURCE_GROUP" \
+            --secrets "database-url=mssql://group_user:${{ secrets.GROUP_DB_PASSWORD }}@${SQL_HOST}:1433/${{ vars.PREFIX }}-group-db"
+          az containerapp update --name "$GROUP_APP" --resource-group "$RESOURCE_GROUP" \
+            --image "ghcr.io/${OWNER}/game-night-group:${GITHUB_SHA}" \
+            --set-env-vars "DATABASE_URL=secretref:database-url" "LIBRARY_URL=${LIBRARY_URL}" "CORS_ORIGIN=${{ vars.UI_ORIGIN }}" "APP_VERSION=${GITHUB_SHA}"
+
+      - name: Upload the UI with the Azure addresses in its config
+        run: |
+          printf 'window.APP_CONFIG = {\n  libraryUrl: "%s",\n  groupUrl: "%s"\n};\n' "$LIBRARY_URL" "$GROUP_URL" > ui/config.js
+          az storage blob upload-batch --account-name "${{ vars.UI_STORAGE }}" --destination '$web' --source ui --overwrite --auth-mode key
+
+      # a sleeping service and a paused database can take a minute or two to wake up, so health is retried for a few minutes
+      - name: Wait until both services report healthy
+        run: |
+          for URL in "$LIBRARY_URL" "$GROUP_URL"; do
+            healthy=no
+            for attempt in $(seq 1 20); do
+              if curl --silent --fail --max-time 30 "$URL/health"; then
+                healthy=yes
+                break
+              fi
+              echo "attempt $attempt: $URL/health is not healthy yet, trying again in 15 seconds"
+              sleep 15
+            done
+            if [ "$healthy" = no ]; then
+              echo "$URL/health never returned 200"
+              exit 1
+            fi
+          done
