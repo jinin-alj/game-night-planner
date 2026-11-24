@@ -78,8 +78,11 @@ def get_night(night_id: int) -> dict | None:
     """return a night with its attendees and guests, or None if it does not exist"""
     with closing(database.get_connection()) as connection:
         cursor = connection.cursor()
+        # style 23 turns the DATE back into YYYY-MM-DD text, the format the service code and the API already use
         cursor.execute(
-            "SELECT id, night_date, available_minutes FROM nights WHERE id = %s", (night_id,)
+            "SELECT id, CONVERT(NVARCHAR(10), night_date, 23) AS night_date, available_minutes"
+            " FROM nights WHERE id = %s",
+            (night_id,),
         )
         night = cursor.fetchone()
         if night is None:
@@ -149,7 +152,7 @@ def get_last_played_dates() -> dict[int, str]:
     with closing(database.get_connection()) as connection:
         cursor = connection.cursor()
         cursor.execute(
-            "SELECT plays.game_id, MAX(nights.night_date) AS last_played FROM plays"
+            "SELECT plays.game_id, CONVERT(NVARCHAR(10), MAX(nights.night_date), 23) AS last_played FROM plays"
             " JOIN nights ON nights.id = plays.night_id GROUP BY plays.game_id"
         )
         rows = cursor.fetchall()

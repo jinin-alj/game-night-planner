@@ -397,3 +397,13 @@ def test_rating_reminders_skip_archived_members():
     service.archive_member(sara["id"])
 
     assert service.rating_reminders() == []
+
+
+def test_migration_002_stores_night_date_as_a_real_date():
+    with closing(database.get_connection()) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT DATA_TYPE AS data_type FROM INFORMATION_SCHEMA.COLUMNS"
+            " WHERE TABLE_NAME = 'nights' AND COLUMN_NAME = 'night_date'"
+        )
+        assert cursor.fetchone()["data_type"] == "date"
