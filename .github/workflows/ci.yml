@@ -45,6 +45,18 @@ jobs:
           echo "DATABASE_URL=mssql://${{ matrix.service }}_user:${password}@localhost:1433/${{ matrix.service }}_db" >> "$GITHUB_ENV"
       - run: pytest --cov=${{ matrix.service }} --cov=database --cov-report=term-missing --cov-fail-under=70
 
+  # system.yaml and the OpenAPI documents describe the system, so a file that doesn't match its format fails the pipeline
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema==4.23.0 pyyaml==6.0.2 openapi-spec-validator==0.7.1
+      - run: python -c "import json, yaml, jsonschema; jsonschema.Draft202012Validator(json.load(open('system.schema.json'))).validate(yaml.safe_load(open('system.yaml')))"
+      - run: openapi-spec-validator services/library/openapi.yaml services/group/openapi.yaml
+
   images:
     needs: test
     runs-on: ubuntu-latest
