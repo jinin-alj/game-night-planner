@@ -1,0 +1,301 @@
+openapi: 3.0.3
+info:
+  title: Group service
+  version: "1.0"
+  description: Members, nights, ratings, plays and the night planner. Planning a night, saving a rating and logging a play call the library service.
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database (never checks library)
+      responses:
+        "200":
+          description: The database works
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database can't be used
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /:
+    get:
+      summary: Short status message
+      responses:
+        "200":
+          description: The service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string }
+                  status: { type: string }
+  /members:
+    get:
+      summary: Every member, active and archived
+      responses:
+        "200":
+          description: All members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Member" }
+    post:
+      summary: Add a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+      responses:
+        "201":
+          description: The new member
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /members/{id}/archive:
+    post:
+      summary: Archive a member who left the group
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The archived member
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /members/{id}/reactivate:
+    post:
+      summary: Bring an archived member back
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The active member
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /nights:
+    post:
+      summary: Create a night with its attendees and guests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [night_date, available_minutes, attendee_ids]
+              properties:
+                night_date: { type: string, format: date }
+                available_minutes: { type: integer, minimum: 1 }
+                attendee_ids:
+                  type: array
+                  minItems: 1
+                  items: { type: integer }
+                guest_names:
+                  type: array
+                  items: { type: string, maxLength: 100 }
+      responses:
+        "201":
+          description: The saved night
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Night" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /nights/{id}:
+    get:
+      summary: One night with its attendees and guests
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The night
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Night" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /nights/{id}/plays:
+    post:
+      summary: Record that a game was played on this night (checks the game exists in library)
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [game_id]
+              properties:
+                game_id: { type: integer }
+      responses:
+        "201":
+          description: The saved play
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  night_id: { type: integer }
+                  game_id: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LibraryUnavailable"
+  /nights/{id}/plan:
+    get:
+      summary: Suggested games for this night, best first (asks library which games fit)
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The plan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  night_id: { type: integer }
+                  night_date: { type: string, format: date }
+                  player_count: { type: integer }
+                  available_minutes: { type: integer }
+                  minutes_left: { type: integer }
+                  games:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        game_id: { type: integer }
+                        title: { type: string }
+                        playtime_minutes: { type: integer }
+                        last_played: { type: string, format: date, nullable: true }
+                        score: { type: number }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LibraryUnavailable"
+  /ratings:
+    put:
+      summary: Save or update a member's score for a game (checks the game exists in library)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [member_id, game_id, score]
+              properties:
+                member_id: { type: integer }
+                game_id: { type: integer }
+                score: { type: integer, minimum: 1, maximum: 10 }
+      responses:
+        "200":
+          description: The saved rating
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_id: { type: integer }
+                  game_id: { type: integer }
+                  score: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/LibraryUnavailable"
+  /reminders:
+    get:
+      summary: Games each active member played but hasn't rated yet (asks library for the titles)
+      responses:
+        "200":
+          description: The reminders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    member_id: { type: integer }
+                    member_name: { type: string }
+                    game_id: { type: integer }
+                    title: { type: string, nullable: true }
+        "503":
+          $ref: "#/components/responses/LibraryUnavailable"
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+  schemas:
+    Health:
+      type: object
+      required: [status, db, version]
+      properties:
+        status: { type: string, example: ok }
+        db: { type: string, example: ok }
+        version: { type: string, description: "Commit SHA of the running image, or dev" }
+    Member:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        is_active: { type: integer, enum: [0, 1] }
+    Night:
+      type: object
+      properties:
+        id: { type: integer }
+        night_date: { type: string, format: date }
+        available_minutes: { type: integer }
+        attendees:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+        guests:
+          type: array
+          items: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid input, with the reason
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Unknown member, night or game
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    LibraryUnavailable:
+      description: The library service couldn't be reached in time
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

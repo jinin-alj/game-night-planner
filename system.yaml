@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=./system.schema.json
+student: jaoaljayyous.ieu2024
+prefix: jaoaljayyous-ieu2024
+public_url: https://jaoaljayyousieu2024ui.z28.web.core.windows.net
+ui:
+  path: ui
+  storage_account: jaoaljayyousieu2024ui
+  calls: [library, group]
+azure:
+  resource_group: rg-jaoaljayyous-ieu2024
+  container_apps_environment: jaoaljayyous-ieu2024-env
+  sql_server: jaoaljayyous-ieu2024-sql
+  registry: ghcr.io/jinin-alj
+services:
+  library:
+    description: The games the group owns, who owns each one, player range and play time.
+    path: services/library
+    openapi: services/library/openapi.yaml
+    port_default: 8000
+    health: /health
+    migrations: services/library/migrations
+    env:
+      PORT: { default: 8000, description: Port the service listens on }
+      DATABASE_URL: { secret: true, description: Connection string of the library database }
+      CORS_ORIGIN: { default: "http://localhost:8080", description: The only web address allowed to call the service from a browser }
+      APP_VERSION: { default: dev, description: "Commit the image was built from, shown by /health" }
+    azure:
+      container_app: jaoaljayyous-ieu2024-library
+      sql_database: jaoaljayyous-ieu2024-library-db
+  group:
+    description: Members, guests, game nights, ratings, plays and the night planner.
+    path: services/group
+    openapi: services/group/openapi.yaml
+    port_default: 8000
+    health: /health
+    migrations: services/group/migrations
+    env:
+      PORT: { default: 8000, description: Port the service listens on }
+      DATABASE_URL: { secret: true, description: Connection string of the group database }
+      CORS_ORIGIN: { default: "http://localhost:8080", description: The only web address allowed to call the service from a browser }
+      APP_VERSION: { default: dev, description: "Commit the image was built from, shown by /health" }
+      LIBRARY_URL: { default: "http://library:8000", description: Base URL of the library service }
+      LIBRARY_TIMEOUT_S: { default: 2, description: Seconds to wait for library before giving up }
+    calls:
+      - service: library
+        url_env: LIBRARY_URL
+        endpoints: ["GET /games/fit", "GET /games/{id}"]
+        timeout_s: 2
+        on_failure: Planning a night, saving a rating and logging a play answer 503 "library is unavailable, try again later", and the UI shows that message; members and nights keep working.
+    azure:
+      container_app: jaoaljayyous-ieu2024-group
+      sql_database: jaoaljayyous-ieu2024-group-db

@@ -1,0 +1,143 @@
+openapi: 3.0.3
+info:
+  title: Library service
+  version: "1.0"
+  description: The games the group owns. Group calls GET /games/fit and GET /games/{id}.
+paths:
+  /health:
+    get:
+      summary: Whether this service can read and write its own database
+      responses:
+        "200":
+          description: The database works
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: The database can't be used
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /:
+    get:
+      summary: Short status message
+      responses:
+        "200":
+          description: The service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string }
+                  status: { type: string }
+  /games:
+    get:
+      summary: List every game, sorted by title
+      responses:
+        "200":
+          description: All games
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Game" }
+    post:
+      summary: Add a game
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewGame" }
+      responses:
+        "201":
+          description: The saved game with its new id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Game" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /games/fit:
+    get:
+      summary: Games that fit this many players in this many minutes
+      parameters:
+        - name: players
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: minutes
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The fitting games, sorted by title
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Game" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /games/{id}:
+    get:
+      summary: One game's id and title
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The game
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, title]
+                properties:
+                  id: { type: integer }
+                  title: { type: string }
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, db, version]
+      properties:
+        status: { type: string, example: ok }
+        db: { type: string, example: ok }
+        version: { type: string, description: "Commit SHA of the running image, or dev" }
+    NewGame:
+      type: object
+      required: [title, owner, min_players, max_players, playtime_minutes]
+      properties:
+        title: { type: string, maxLength: 100 }
+        owner: { type: string, maxLength: 100 }
+        min_players: { type: integer, minimum: 1 }
+        max_players: { type: integer, minimum: 1 }
+        playtime_minutes: { type: integer, minimum: 1 }
+    Game:
+      allOf:
+        - $ref: "#/components/schemas/NewGame"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: integer }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid input, with the reason
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such game
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
